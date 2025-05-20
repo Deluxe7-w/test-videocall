@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Video Call Room</title>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; }
+    #menu, #app { padding: 20px; }
+    #menu button { margin: 10px; }
+    #video-grid { display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); gap: 10px; height: 60vh; }
+    video { width: 100%; height: 100%; object-fit: cover; background: black; }
+    #chat { position: absolute; top: 10px; right: 10px; background: white; padding: 10px; border: 1px solid #ccc; max-height: 300px; overflow-y: auto; width: 200px; }
+    #chat input { width: 100%; }
+    #username { margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div id="menu">
+    <button onclick="createRoom()">Create</button>
+    <button onclick="showJoin()">Code</button>
+    <div id="join" style="display:none;">
+      <input id="joinCode" placeholder="Enter room code"/>
+      <button onclick="joinRoom()">Join</button>
+    </div>
+    <div id="username">
+      Username: <input id="usernameInput" value="User" onchange="updateUsername()"/>
+    </div>
+  </div>
+
+  <div id="app" style="display:none;">
+    <h3>Room: <span id="roomCode"></span></h3>
+    <div id="video-grid"></div>
+    <div id="chat">
+      <div id="messages"></div>
+      <input id="chatInput" placeholder="Chat..." onkeypress="if(event.key==='Enter') sendMessage()"/>
+    </div>
+  </div>
+
+  <script>
+    let peer, myStream, connections = {}, username = "User";
+
+    function updateUsername() {
+      username = document.getElementById('usernameInput').value;
+    }
+
+    function createRoom() {
+      peer = new Peer();
+      peer.on('open', id => {
+        document.getElementById('menu').style.display = 'none';
+        document.getElementById('app').style.display = 'block';
+        document.getElementById('roomCode').textContent = id;
+        startCamera(() => setupPeerEvents());
+      });
+    }
+
+    function showJoin() {
+      document.getElementById('join').style.display = 'block';
+    }
+
+    function joinRoom() {
+      const hostId = document.getElementById('joinCode').value;
+      peer = new Peer();
+      peer.on('open', () => {
+        document.getElementById('menu').style.display = 'none';
+        document.getElementById('app').style.display = 'block';
+        document.getElementById('roomCode').textContent = hostId;
+        startCamera(() => {
+          connectToPeer(hostId);
+        });
+        setupPeerEvents();
+      });
+    }
+
+    function startCamera(callback) {
+      navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
+        myStream = stream;
+        addVideoStream('Me', stream);
+        callback();
+      });
+    }
+
+    function setupPeerEvents() {
+      peer.on('call', call => {
+        call.answer(myStream);
+        call.on('stream', remoteStream => {
+          if (!connections[call.peer]) {
+            addVideoStream(call.peer, remoteStream);
+            connections[call.peer] = call;
+          }
+        });
+      });
+
+      peer.on('connection', conn => {
+        conn.on('data', data => {
+          appendMessage(`${data.name}: ${data.msg}`);
+        });
+        connections[conn.peer] = conn;
+      });
+    }
+
+    function connectToPeer(id) {
+      const call = peer.call(id, myStream);
+      call.on('stream', remoteStream => {
+        if (!connections[call.peer]) {
+          addVideoStream(call.peer, remoteStream);
+          connections[call.peer] = call;
+        }
+      });
+
+      const conn = peer.connect(id);
+      conn.on('open', () => {
+        conn.on('data', data => {
+          appendMessage(`${data.name}: ${data.msg}`);
+        });
+        connections[id] = conn;
+      });
+    }
+
+    function addVideoStream(label, stream) {
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.autoplay = true;
+      video.playsInline = true;
+      document.getElementById('video-grid').appendChild(video);
+    }
+
+    function sendMessage() {
+      const input = document.getElementById('chatInput');
+      const msg = input.value;
+      input.value = '';
+      appendMessage(`Me: ${msg}`);
+      for (let id in connections) {
+        if (connections[id].send) {
+          connections[id].send({ name: username, msg });
+        }
+      }
+    }
+
+    function appendMessage(text) {
+      const messages = document.getElementById('messages');
+      const msgDiv = document.createElement('div');
+      msgDiv.textContent = text;
+      messages.appendChild(msgDiv);
+      messages.scrollTop = messages.scrollHeight;
+    }
+  </script>
+</body>
+</html>
